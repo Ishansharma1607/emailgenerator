@@ -7,7 +7,6 @@ class TempMailServer {
     constructor() {
         this.emails = new Map();
         this.setupGmail();
-        this.setupImapListener();
     }
 
     setupGmail() {
@@ -19,9 +18,8 @@ class TempMailServer {
                 pass: process.env.EMAIL_APP_PASSWORD
             }
         });
-    }
 
-    setupImapListener() {
+        // Setup IMAP
         this.imap = new Imap({
             user: process.env.EMAIL_USER,
             password: process.env.EMAIL_APP_PASSWORD,
@@ -31,73 +29,61 @@ class TempMailServer {
             tlsOptions: { rejectUnauthorized: false }
         });
 
-        this.imap.on('ready', () => {
-            this.listenForEmails();
+        // Handle IMAP connection
+        this.imap.once('ready', () => {
+            this.imap.openBox('INBOX', false, (err, box) => {
+                if (err) {
+                    console.error('Error opening mailbox:', err);
+                    return;
+                }
+                console.log('Connected to INBOX');
+                this.listenForEmails();
+            });
         });
 
         this.imap.on('error', (err) => {
             console.error('IMAP error:', err);
-            // Try to reconnect after error
-            setTimeout(() => {
-                this.imap.connect();
-            }, 10000);
         });
 
-        this.imap.connect();
+        this.imap.on('end', () => {
+            console.log('IMAP connection ended');
+            setTimeout(() => {
+                this.imap.connect();
+            }, 5000);
+        });
     }
 
-    async listenForEmails() {
-        try {
-            await this.imap.openBox('INBOX', false);
-            console.log('Watching for new emails...');
+    listenForEmails() {
+        this.imap.on('mail', () => {
+            this.imap.search(['UNSEEN'], (err, results) => {
+                if (err || !results.length) return;
 
-            this.imap.on('mail', () => {
-                this.fetchNewEmails();
-            });
-        } catch (err) {
-            console.error('Error opening mailbox:', err);
-        }
-    }
+                const fetch = this.imap.fetch(results, {
+                    bodies: '',
+                    markSeen: true
+                });
 
-    async fetchNewEmails() {
-        try {
-            const messages = await new Promise((resolve, reject) => {
-                this.imap.search(['UNSEEN'], (err, results) => {
-                    if (err) reject(err);
-                    else resolve(results);
+                fetch.on('message', (msg) => {
+                    msg.on('body', (stream) => {
+                        simpleParser(stream, (err, parsed) => {
+                            if (err) return;
+                            
+                            const to = parsed.to.text;
+                            const plusPart = to.match(/\+([^@]+)@/);
+                            
+                            if (plusPart && this.emails.has(plusPart[1])) {
+                                const handler = this.emails.get(plusPart[1]);
+                                handler({
+                                    from: parsed.from.text,
+                                    subject: parsed.subject,
+                                    body: parsed.text
+                                });
+                            }
+                        });
+                    });
                 });
             });
-
-            if (!messages.length) return;
-
-            const fetch = this.imap.fetch(messages, {
-                bodies: '',
-                markSeen: true
-            });
-
-            fetch.on('message', (msg) => {
-                msg.on('body', async (stream) => {
-                    try {
-                        const parsed = await simpleParser(stream);
-                        const to = parsed.to.text;
-                        const plusPart = to.match(/\+([^@]+)@/);
-                        
-                        if (plusPart && this.emails.has(plusPart[1])) {
-                            const handler = this.emails.get(plusPart[1]);
-                            handler({
-                                from: parsed.from.text,
-                                subject: parsed.subject,
-                                body: parsed.text
-                            });
-                        }
-                    } catch (err) {
-                        console.error('Error processing message:', err);
-                    }
-                });
-            });
-        } catch (err) {
-            console.error('Error fetching emails:', err);
-        }
+        });
     }
 
     generateTempEmail() {
@@ -108,22 +94,30 @@ class TempMailServer {
     }
 
     registerEmailHandler(email, handler) {
-        const plusPart = email.match(/\+([^@]+)@/)[1];
-        this.emails.set(plusPart, handler);
+        const plusPart = email.match(/\+([^@]+)@/);
+        if (plusPart) {
+            this.emails.set(plusPart[1], handler);
+        }
     }
 
     async sendTestEmail(to) {
-        const info = await this.transporter.sendMail({
-            from: process.env.EMAIL_USER,
-            to: to,
-            subject: 'Test Email',
-            text: 'This is a test email from your temporary email service!'
-        });
-        return info;
+        try {
+            const info = await this.transporter.sendMail({
+                from: process.env.EMAIL_USER,
+                to: to,
+                subject: 'Test Email',
+                text: 'This is a test email from your temporary email service!'
+            });
+            return info;
+        } catch (error) {
+            console.error('Error sending email:', error);
+            throw error;
+        }
     }
 
     start() {
-        console.log('Gmail service initialized');
+        console.log('Gmail service initializing...');
+        this.imap.connect();
     }
 }
 
