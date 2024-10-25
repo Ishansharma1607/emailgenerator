@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Temp Mail Service</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        #emails {
+            margin-top: 20px;
+            border: 1px solid #ccc;
+            padding: 10px;
+        }
+        .email-item {
+            border-bottom: 1px solid #eee;
+            padding: 10px 0;
+        }
+    </style>
+</head>
+<body>
+    <h1>Temporary Email Service</h1>
+    <div>
+        <button onclick="generateEmail()">Generate New Email</button>
+        <p id="current-email"></p>
+    </div>
+    <div id="emails">
+        <h2>Received Emails</h2>
+        <div id="email-list"></div>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+        const socket = io();
+        let currentEmail = '';
+
+        async function generateEmail() {
+            const response = await fetch('/api/generate-email');
+            const data = await response.json();
+            currentEmail = data.email;
+            document.getElementById('current-email').textContent = `Your temporary email: ${currentEmail}`;
+            socket.emit('register-email', currentEmail);
+        }
+
+        socket.on('new-email', (email) => {
+            const emailList = document.getElementById('email-list');
+            const emailDiv = document.createElement('div');
+            emailDiv.className = 'email-item';
+            emailDiv.innerHTML = `
+                <p><strong>From:</strong> ${email.from}</p>
+                <p><strong>Subject:</strong> ${email.subject}</p>
+                <p><strong>Body:</strong> ${email.body}</p>
+            `;
+            emailList.prepend(emailDiv);
+        });
+    </script>
+</body>
+</html>
