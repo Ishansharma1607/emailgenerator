@@ -1,6 +1,7 @@
 const express = require('express');
 const TempMailServer = require('./smtp-server');
 const path = require('path');
+const nodemailer = require('nodemailer');
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -15,6 +16,24 @@ app.use(express.static('public'));
 app.get('/api/generate-email', (req, res) => {
     const tempEmail = mailServer.generateTempEmail();
     res.json({ email: tempEmail });
+});
+
+// Add this new endpoint after your existing endpoints
+app.post('/api/test-email', async (req, res) => {
+    try {
+        const email = req.query.email || 'test@tempmail.local';
+        const result = await mailServer.sendTestEmail(email);
+        res.json({ 
+            success: true, 
+            message: 'Test email sent',
+            previewUrl: nodemailer.getTestMessageUrl(result)
+        });
+    } catch (error) {
+        res.status(500).json({ 
+            success: false, 
+            error: error.message 
+        });
+    }
 });
 
 // WebSocket setup for real-time email notifications
